@@ -3,6 +3,7 @@ import os
 import cv2
 import numpy as np
 import pandas as pd
+import pywt
 import torch
 from matplotlib import pyplot as plt
 from pandas import DataFrame
@@ -371,13 +372,14 @@ def get_dataloader(path, batch_size: int, slice_length=512) -> DataLoader:
 
 def get_signal_dataloader(path, batch_size: int, slice_length=512, slice_type='window',
                           add_noise=False, window_ratio=0.5) -> DataLoader:
-    dataset = Signals(path, slice_length=slice_length, slice_type=slice_type,
-                      add_noise=add_noise, windows_rate=window_ratio)
+    # dataset = Signals(path, slice_length=slice_length, slice_type=slice_type,
+    #                   add_noise=add_noise, windows_rate=window_ratio)
+    dataset = NpzSignalDataset(path, slice_length)
     return DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 
 def get_shape():  # 获取输入的形状
-    return 1, 1, 512
+    return 1, 1, 128
 
 
 def make_noise(t: tensor) -> tensor:
@@ -402,37 +404,133 @@ def make_noise(t: tensor) -> tensor:
     return tensor(noises, dtype=float32)
 
 
-def process_signal(signal: tensor) -> tensor:
+def WD_signal(signal: np.ndarray) -> np.ndarray:
     """
-    处理信号，使用卡尔曼滤波器
+    处理信号，默认使用小波去噪
     :param signal: 输入信号
     :return: 处理后的信号
     """
-    signal = signal.flatten(1)
-    signal = signal.detach().cpu().numpy()
+    signal = signal.reshape(-1, signal.shape[2])
     for i in range(len(signal)):
-        kf = KalmanFilter(initial_state_mean=0, n_dim_obs=1)
-        kf = kf.em(signal[i], n_iter=10)
-        kf.transition_covariance = 0.01 * np.eye(kf.n_dim_state)
-        (smoothed_state_means, _) = kf.filter(signal[i])
-        smoothed_state_means = smoothed_state_means.flatten()
-        signal[i] = smoothed_state_means
-    return tensor(signal, dtype=float32).view(-1, 1, signal.shape[1])
+        coeffs = pywt.wavedec(signal[i], 'db1', level=1)
+        # 将小波系数的绝对值进行阈值处理
+        sigma = np.median(np.abs(coeffs[-1])) / 0.6745
+        uthresh = sigma * np.sqrt(2 * np.log(len(signal[i])))
+        denoised_coeffs = [coeffs[0]]
+        for j in range(1, len(coeffs)):
+            denoised_coeffs.append(pywt.threshold(coeffs[j], uthresh, mode='soft'))
+        signal[i] = pywt.waverec(denoised_coeffs, 'db1')
+    return signal.reshape(-1, 1, signal.shape[1])
+
+
+class KalmanFilterSignal:
+    def __init__(self, F, H, Q, R, x0, P0):
+        self.F = F
+        self.H = H
+        self.Q = Q
+        self.R = R
+        self.x = x0
+        self.P = P0
+
+    def predict(self):
+        self.x = np.dot(self.F, self.x)
+        self.P = np.dot(np.dot(self.F, self.P), self.F.T) + self.Q
+
+    def update(self, z):
+        y = z - np.dot(self.H, self.x)
+        S = np.dot(np.dot(self.H, self.P), self.H.T) + self.R
+        K = np.dot(np.dot(self.P, self.H.T), np.linalg.inv(S))
+        self.x = self.x + np.dot(K, y)
+        self.P = self.P - np.dot(np.dot(K, self.H), self.P)
+        return self.x
+
+
+def KM_signal(signal: np.ndarray) -> np.ndarray:
+    """
+    使用卡尔曼滤波器对信号进行处理
+    :param signal: 输入信号
+    :return: 处理后的信号
+    """
+    signal = signal.reshape(-1, signal.shape[2])
+    F = np.array([[1]])
+    H = np.array([[1]])
+    Q = np.array([[0.0001]])
+    R = np.array([[0.1]])
+    x0 = np.array([[0]])
+    P0 = np.array([[1]])
+    kf = KalmanFilterSignal(F, H, Q, R, x0, P0)
+    for i in range(len(signal)):
+        kf.predict()
+        signal[i] = kf.update(signal[i])
+    return signal.reshape(-1, 1, signal.shape[1])
+
+class NpzSignalDataset(Dataset):
+
+    def __init__(self, path, signal_size=256, transform=None):  # 3*signal_size, 3为通道数, signal_size为信号长度, 256为默认值
+
+        self.path = path  # 文件夹路径
+        self.signal_size = signal_size
+        self.transform = transform
+        self.pathList = [file for file in os.listdir(self.path) if file.endswith('.npz')]  # 获取文件夹下所有npz文件
+        # 根据self.pathList创建文件名、数字的映射字典，用于后续的label
+        self.label2dict = {label: i for i, label in
+                           enumerate(self.pathList)}  # {'z3_1000.npz': 0, 'z3_2000.npz': 1, 'z3_3000.npz': 2}
+        self.label = []
+        self.data = self.read_npz()
+        self.data= self.process_data()
+        self.target = np.array([self.label2dict[label] for label in self.label])
+        # 将AI0, AI1, AI2, AI3的数据合并，变为四维数据
+
+    def process_data(self):
+        # 调整self.data的形状，交换第二和第三维
+        self.data = np.swapaxes(self.data, 1, 2)
+        if self.transform:
+            return self.transform(self.data, self.label)
+        return self.data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, i):
+        # print(self.data[i].shape)
+        return self.data[i], self.label2dict[self.label[i]]
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def read_npz(self):
+        data = []
+        for file in self.pathList:
+            raw_data = np.load(self.path + file, allow_pickle=True)
+            # 将数据根据signal_size切分, 去掉最后不足signal_size的数据
+            np_data = raw_data['data']
+            for i in range(0, len(np_data), self.signal_size):
+                # 去掉最后不足signal_size的数据
+                if i + self.signal_size > len(np_data):
+                    break
+                data.append(np_data[i:i + self.signal_size])
+                self.label.append(file)
+        return np.array(data)
 
 
 if __name__ == '__main__':
     print('test')
-    del_labels = ['Aligned', 'Parallel', 'Unbalance']
-    dataSet = Signals('../data', slice_type='origin', delete_labels=del_labels)
-    noise, data = generate_mixed_signal_data(dataSet.data)
+    dataSet = Signals('../data', slice_type='origin')
+    # dataSet = NpzSignalDataset('../data/AI1/')
+    data, noise = generate_mixed_signal_data(dataSet.data)
     save_path = '../work_dirs/noisy'
+    kf_signal = KM_signal(noise.copy())  # 使用卡尔曼滤波器处理信号
+    wd_signal = WD_signal(noise.copy())  # 使用小波去噪处理信号
     # 绘制原始信号和带噪声的信号
-    for i in range(len(data)):
-        plt.figure(figsize=(320, 6))
-        plt.plot(data[i][0], label='Noisy Signal', linestyle='--', linewidth=1)
-        plt.plot(noise[i][0], label='Original Signal', linewidth=1)
-        plt.xlabel("Sample Index")
-        plt.ylabel("Amplitude")
-        plt.legend()
-        plt.savefig(os.path.join(save_path, f'{i}.png'))
+    for i in tqdm(range(len(data)), desc='正在绘制信号图像'):
+        fig, ax = plt.subplots(4, 1, figsize=(320, 48))
+        ax[0].plot(data[i][0], label='Original Signal', linewidth=1)
+        ax[0].set_title('Original Signal')
+        ax[1].plot(noise[i][0], label='Noisy Signal', linestyle='--', linewidth=1)
+        ax[1].set_title('Noisy Signal')
+        ax[2].plot(kf_signal[i][0], label='Kalman Filter Signal', linestyle='--', linewidth=1)
+        ax[2].set_title('Kalman Filter Signal')
+        ax[3].plot(wd_signal[i][0], label='Wavelet Denoising Signal', linestyle='--', linewidth=1)
+        ax[3].set_title('Wavelet Denoising Signal')
+        plt.savefig(os.path.join(save_path, str(i) + '.png'))
         plt.close()

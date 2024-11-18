@@ -224,7 +224,7 @@ class ConvNet1DClassify(nn.Module):
     def forward(self, x):
         for m_x in self.cnn1d_blocks:
             x = m_x(x)
-        return self.fces(x.flatten(1))
+        return x, self.fces(x.flatten(1))
 
 
 class ConvNet(nn.Module):
