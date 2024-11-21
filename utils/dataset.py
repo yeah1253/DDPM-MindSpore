@@ -512,20 +512,33 @@ class NpzSignalDataset(Dataset):
                 self.label.append(file)
         return np.array(data)
 
+class GanDataset(Dataset):
+
+    def __init__(self, data, target):
+        self.data = data
+        self.target = target
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, i):
+        return self.data[i], self.target[i]
 
 if __name__ == '__main__':
     print('test')
-    dataSet = Signals('../data', slice_type='origin')
-    # dataSet = NpzSignalDataset('../data/AI1/')
-    data, noise = generate_mixed_signal_data(dataSet.data)
+    # dataSet = Signals('../data', slice_type='origin')
+    dataSet = NpzSignalDataset('../data/AI1/')
+    # data, noise = generate_mixed_signal_data(dataSet.data)
+    # gan_dataset = GanDataset(noise, data)
+    noise = dataSet.data
     save_path = '../work_dirs/noisy'
     kf_signal = KM_signal(noise.copy())  # 使用卡尔曼滤波器处理信号
     wd_signal = WD_signal(noise.copy())  # 使用小波去噪处理信号
     # 绘制原始信号和带噪声的信号
-    for i in tqdm(range(len(data)), desc='正在绘制信号图像'):
+    for i in tqdm(range(len(noise)), desc='正在绘制信号图像'):
         fig, ax = plt.subplots(4, 1, figsize=(320, 48))
-        ax[0].plot(data[i][0], label='Original Signal', linewidth=1)
-        ax[0].set_title('Original Signal')
+        # ax[0].plot(data[i][0], label='Original Signal', linewidth=1)
+        # ax[0].set_title('Original Signal')
         ax[1].plot(noise[i][0], label='Noisy Signal', linestyle='--', linewidth=1)
         ax[1].set_title('Noisy Signal')
         ax[2].plot(kf_signal[i][0], label='Kalman Filter Signal', linestyle='--', linewidth=1)
