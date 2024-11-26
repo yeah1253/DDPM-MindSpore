@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt, rcParams
+from networkx.algorithms.bipartite.basic import color
 from sklearn.model_selection import train_test_split
 from torch import tensor
 from torch.utils.data import DataLoader, TensorDataset
@@ -439,7 +440,6 @@ def prepare_data(data_path='./data/wuxi_a4',
     :param device: 设备
     :return: 数据集，任务类型
     """
-    plt.rcParams.update({'font.size': 30})
     # 根据是否添加噪声，以及是否去噪，选择不同的数据集， 以及绘制不同的图像，确定不同的任务类型
     if denoising_properties:
         add_noise = True
@@ -450,7 +450,7 @@ def prepare_data(data_path='./data/wuxi_a4',
         # 取出8个不同标签的信号，绘制信号的图
         indexes = []
         for i in range(8):
-            indexes.append(np.random.choice(np.where(dataset.target == i)[0]))
+            indexes.append(np.where(dataset.target == i)[0][0])
         noisy_data = dataset.data[indexes].copy()
 
         denoising_methods = {
@@ -486,28 +486,21 @@ def prepare_data(data_path='./data/wuxi_a4',
                                device='cuda')
 
         dataset.data = denoising_methods[denoising_properties['denoising method']]()      # 绘制8个处理后的信号
-        # 设置全局字体大小参数
-        font_size = 14
 
-        fig, axes = plt.subplots(2, 4, figsize=(12, 6))  # 使用较小的 figsize
+        fig, axes = plt.subplots(4, 4, figsize=(24, 12))  # 使用较小的 figsize
+        # 画出16个信号，相邻两个子图分别是原始信号和去噪后的信号
         for i in range(8):
-            ax = axes[i // 4, i % 4]
-            ax.plot(noisy_data[i][0], label='noisy', color='blue')
-            ax2 = ax.twinx()  # 创建第二个 y 轴
-            ax2.plot(dataset.data[indexes[i]][0], label='denoised signal', color='orange')
+            # 绘制噪声信号
+            ax_noisy = axes[i // 2, (i % 2) * 2]  # 每对信号占据两列中的第一列
+            ax_noisy.plot(noisy_data[i][0], label='noisy')
+            ax_noisy.set_title(f'Noisy{i}')
+            # ax_noisy.legend()
 
-            # 设置标题和轴标签
-            ax.set_title(f'label {dataset.target[indexes[i]]}', fontsize=font_size)
-            if i % 4 == 0:
-                ax.set_ylabel('Noisy Signal', fontsize=font_size)  # 左侧 y 轴标签
-            if i >= 4:
-                ax.set_xlabel('Time', fontsize=font_size)  # 下方 x 轴标签
-            if i % 4 == 3:
-                ax2.set_ylabel('Denoised', fontsize=font_size)  # 仅为每行最后一个子图设置右侧 y 轴标签
-
-            # 设置 x 和 y 轴刻度标签的字体大小
-            ax.tick_params(axis='both', which='major', labelsize=font_size)
-            ax2.tick_params(axis='y', which='major', labelsize=font_size)
+            # 绘制去噪信号
+            ax_denoised = axes[i // 2, (i % 2) * 2 + 1]  # 每对信号占据两列中的第二列
+            ax_denoised.plot(dataset.data[indexes[i]][0], label='denoised',color='red')
+            ax_denoised.set_title(f'Denoised{i}')
+            # ax_denoised.legend()
 
         plt.tight_layout()
         # 保存图像
@@ -522,8 +515,8 @@ def prepare_data(data_path='./data/wuxi_a4',
         # 取出8个不同标签信号，绘制信号的图
         indexes = []
         for i in range(8):
-            indexes.append(np.random.choice(np.where(dataset.target == i)[0]))
-        fig, axes = plt.subplots(2, 4, figsize=(24, 10))
+            indexes.append(np.where(dataset.target == i)[0][0])
+        fig, axes = plt.subplots(2, 4, figsize=(12, 6))
         fig.tight_layout(h_pad=5, w_pad=5)
         for i in range(8):
             ax = axes[i // 4, i % 4]
@@ -623,6 +616,8 @@ def train_sd_ddim(data_path='./data/', device="cuda" if torch.cuda.is_available(
 
 
 if __name__ == '__main__':
+    # 字体大小
+    # plt.rcParams.update({'font.size': 8})
     rcParams['font.sans-serif'] = ['SimSun']  # Chinese font
     rcParams['font.family'] = 'sans-serif'  # Set Chinese and other fonts to sans-serif
     rcParams['font.serif'] = ['Times New Roman']  # English font

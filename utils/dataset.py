@@ -501,7 +501,7 @@ class NpzSignalDataset(Dataset):
     def read_npz(self):
         data = []
         for file in self.pathList:
-            raw_data = np.load(self.path + file, allow_pickle=True)
+            raw_data = np.load(os.path.join(self.path, file), allow_pickle=True)
             # 将数据根据signal_size切分, 去掉最后不足signal_size的数据
             np_data = raw_data['data']
             for i in range(0, len(np_data), self.signal_size):
