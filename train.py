@@ -537,6 +537,7 @@ def test_classification(writer, device, model, config_id, log_dir, test_dataload
         acc = 0
         best_feature = [] # 存储特征, 用于可视化
         labels = []
+        res = []
         for x, y in tqdm(test_dataloader, desc='validating'):
             x = x.to(device).float()
             y = y.to(device).long()
@@ -544,10 +545,13 @@ def test_classification(writer, device, model, config_id, log_dir, test_dataload
             acc += (logits.argmax(dim=-1) == y).float().mean()
             best_feature.append(feature.cpu().numpy())
             labels.append(y.cpu().numpy())
+            res.append(logits.argmax(dim=-1).cpu().numpy())
         acc /= len(test_dataloader)
         # 存储特征与标签
+        res = np.concatenate(res, axis=0)
         features = np.concatenate(best_feature, axis=0)
         labels = np.concatenate(labels, axis=0)
+        np.save(os.path.join(log_dir, 'res.npy'), res)
         np.save(os.path.join(log_dir, 'features.npy'), features)
         np.save(os.path.join(log_dir, 'labels.npy'), labels)
         writer.add_scalar('test acc', acc.item())

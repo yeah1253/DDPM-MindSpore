@@ -218,13 +218,14 @@ class ConvNet1DClassify(nn.Module):
             nn.Linear(W * prev_channel, W // 2),
             nn.Dropout(0.5),
             nn.ReLU(),
-            nn.Linear(W // 2, out_dim)
         )
+        self.final_layer = nn.Linear(W // 2, out_dim)
 
     def forward(self, x):
         for m_x in self.cnn1d_blocks:
             x = m_x(x)
-        return x, self.fces(x.flatten(1))
+        x = self.fces(x.flatten(1))
+        return x, self.final_layer(x)
 
 
 class ConvNet(nn.Module):

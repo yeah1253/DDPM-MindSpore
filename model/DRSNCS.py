@@ -221,6 +221,7 @@ def test_model(writer, config_id, test_loader, log_dir, model_name, device='cuda
     test_acc = 0.0
     features = []
     labels = []
+    res = []
     with torch.no_grad(): # 不进行反向传播
         for i, (inputs, label) in enumerate(test_loader):
             inputs, label = inputs.to(device).float(), label.to(device).long()
@@ -229,11 +230,14 @@ def test_model(writer, config_id, test_loader, log_dir, model_name, device='cuda
             test_acc += (predicted == label).sum().item()
             features.append(feature.detach().cpu().numpy())
             labels.append(label.detach().cpu().numpy())
+            res.append(predicted.detach().cpu().numpy())
 
+    res = np.concatenate(res, axis=0)
     features = np.concatenate(features, axis=0)
     labels = np.concatenate(labels, axis=0)
 
     # 保存特征
+    np.save(os.path.join(log_dir, 'res.npy'), res)
     np.save(os.path.join(log_dir, 'features.npy'), features)
     np.save(os.path.join(log_dir, 'labels.npy'), labels)
 
