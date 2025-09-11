@@ -63,7 +63,7 @@ class Signal:
     def loadMat(self):
         rawData = loadmat(self.path)
         data = np.array([[v[1].T[0]] for v in rawData['data'][0]])
-        data = np.array([v[:, int(len(v[0]) * 0.2):int(len(v[0]) * 0.8)] for v in data])
+        data = np.array([v[:, int(len(v[0]) * 0.2):int(len(v[0]) * 0.8)] for v in data])  #取中间 [20%, 80%] 区间，去掉首尾 20% 以减小启动/收尾段的非稳态或噪声干扰；
         slices, slices_labels = self.slice_data(data)
         return pd.DataFrame(slices, index=[v[0][0] for v in rawData['data'][0]], columns=slices_labels)
 

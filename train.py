@@ -446,7 +446,7 @@ def prepare_data(data_path='./data',
         task_type = ' denoising'
         # 根据dataset.target,选择8个不同标签的信号,使得每个标签的信号都有一个
         indexes = []
-        for i in range(8):
+        for i in range(4):
             indexes.append(np.random.choice(np.where(dataset.target == i)[0]))
         # 存储8条信号
         noisy_signals = dataset.data[indexes].copy()
@@ -632,8 +632,9 @@ if __name__ == '__main__':
     # prepare_data(add_noise=False)  # 准备数据，不添加噪声
     # prepare_data(add_noise=True)  # 准备数据，添加噪声
     del_labels = ['Broken', 'Parallel', 'SWF', 'Unbalance']
+    # del_labels = None
     # 一共有8个标签,分别是 Aligned, Bearing, Bowed, Broken, Normal, Parallel, SWF, Unbalance
-    # 删除后剩下5个标签，分别是 Aligned, Bearing, Bowed, Normal
+    # 删除后剩下4个标签，分别是 Aligned, Bearing, Bowed, Normal
     dataset_config = {
         'data_path': './data',
         'slice_length': 512,
