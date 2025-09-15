@@ -88,25 +88,25 @@ bi_lstm_big_cfg = {
 convnet1d_big_classify_cfg = {
     'type': 'ConvNet1DClassify',
     'intermediate_channels': [20, 40, 80, 40, 20],
-    'out_dim': 8,
+    'out_dim': 4,
 }
 
 convnet1d_medium_classify_cfg = {
     'type': 'ConvNet1DClassify',
     'intermediate_channels': [20, 40, 80, 20],
-    'out_dim': 8,
+    'out_dim': 4,
 }
 
 convnet1d_small_classify_cfg = {
     'type': 'ConvNet1DClassify',
     'intermediate_channels': [10, 20, 10],
-    'out_dim': 8,
+    'out_dim': 4,
 }
 
 convnet1d_mini_classify_cfg = {
     'type': 'ConvNet1DClassify',
     'intermediate_channels': [10, 10],
-    'out_dim': 8,
+    'out_dim': 4,
 }
 
 configs = [

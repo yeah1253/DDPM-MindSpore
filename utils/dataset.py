@@ -58,56 +58,37 @@ class Signal:
                 self.label = key
                 break
         df = self.loadMat()
-        self.data = df.loc[['TimeData/Motor/S_x', 'TimeData/Motor/R_y', 'TimeData/Motor/T_z'],]  # 选择三个轴的数据
-        # self.stftData = self.saveSTFT()  # 保存STFT图的路径
+        self.data = df.loc[['TimeData/Motor/S_x'],]  # 选择x轴的数据, 'TimeData/Motor/R_y', 'TimeData/Motor/T_z'
 
     def loadMat(self):
         rawData = loadmat(self.path)
-        dataLabels = [v[0][0] for v in rawData['data'][0]]
-        data = [[v[1].T[0]] for v in rawData['data'][0]]
-        data = np.array(data)  # 将数据转换为numpy数组
-        # 去掉前20%和后20%的数据
-        data = [v[:, int(len(v[0]) * 0.2):int(len(v[0]) * 0.8)] for v in data]
-        data = np.array(data)  # 将数据转换为numpy数组
-        if self.add_noise:
-            original, data = generate_mixed_signal_data(data)
-            # 绘制原始信号和带噪声的信号
-            # plt.figure(figsize=(18, 6))
-            # plt.plot(data[0][0], label='Noisy Signal', linestyle='--', linewidth=1)
-            # plt.plot(original[0][0], label='Original Signal', linewidth=1)
-            # plt.xlabel("Sample Index")
-            # plt.ylabel("Amplitude")
-            # plt.legend()
-            # plt.show()
-            # plt.close()
-        # print("data[0]=", data[0])
-        slices = []
+        data = np.array([[v[1].T[0]] for v in rawData['data'][0]])
+        data = np.array([v[:, int(len(v[0]) * 0.2):int(len(v[0]) * 0.8)] for v in data])  #取中间 [20%, 80%] 区间，去掉首尾 20% 以减小启动/收尾段的非稳态或噪声干扰；
+        slices, slices_labels = self.slice_data(data)
+        return pd.DataFrame(slices, index=[v[0][0] for v in rawData['data'][0]], columns=slices_labels)
+
+    def slice_data(self, data):
         if self.slice_type == 'cut':
-            slices_labels = [self.label + "_" + str(i) for i in
-                             range(len(data[0][0]) // self.slice_length)]  # 生成切片标签
-            for v in data:  # 切片
-                temp = []
-                for i in range(len(v[0]) // self.slice_length):
-                    temp.append(np.array(v[0][i * self.slice_length:(i + 1) * self.slice_length]))
-                slices.append(temp)
+            return self.cut_data(data), [self.label + "_" + str(i) for i in range(len(data[0][0]) // self.slice_length)]
         elif self.slice_type == 'window':
-            for v in data:
-                temp = []
-                left, right = 0, self.slice_length
-                while right < len(v[0]):  # 信号重合度为1 - self.windows_rate
-                    temp.append(np.array(v[0][left:right]))
-                    left += int(self.slice_length * self.windows_rate)
-                    right += int(self.slice_length * self.windows_rate)
-                slices.append(temp)
-            slices_labels = [self.label + "_" + str(i) for i in range(len(slices[0]))]
+            return self.window_data(data), [self.label + "_" + str(i) for i in range(len(self.window_data(data)[0]))]
         else:
-            for v in data:  # 存储原始数据
-                slices.append([v[0]])
-            slices_labels = [self.label + "_" + str(i) for i in range(len(slices[0]))]
-        # print("dataLabels=", dataLabels)
-        df = DataFrame(slices, index=dataLabels, columns=slices_labels, )
-        # print("df=", df)
-        return df
+            return [[v[0]] for v in data], [self.label + "_" + str(i) for i in range(len(data))]
+
+    def cut_data(self, data):
+        return [
+            [v[0][i * self.slice_length:(i + 1) * self.slice_length] if not self.add_noise else
+             generate_mixed_signal_data(v[0][i * self.slice_length:(i + 1) * self.slice_length].reshape(1, 1, -1),
+                                        np.random.randint(-35, -25))[1].reshape(1, -1)
+             for i in range(len(v[0]) // self.slice_length)] for v in data]
+
+    def window_data(self, data):
+        return [
+            [v[0][left:right] if not self.add_noise else
+             generate_mixed_signal_data(v[0][left:right].reshape(1, 1, -1),
+                                        np.random.randint(-35, -25))[1].reshape(1, -1)
+             for left in range(0, len(v[0]), int(self.slice_length * self.windows_rate)) for right in
+             range(self.slice_length, len(v[0]) + 1, int(self.slice_length * self.windows_rate))] for v in data]
 
     def saveSTFT(self):
         for label in self.data.index:
@@ -175,8 +156,8 @@ class Signals(Dataset):
     def makeDataSets(self):
         dic = {
             'TimeData/Motor/S_x': 0,
-            'TimeData/Motor/R_y': 1,
-            'TimeData/Motor/T_z': 2,
+            # 'TimeData/Motor/R_y': 1,
+            # 'TimeData/Motor/T_z': 2,
         }
         data = []
         target = []
@@ -366,8 +347,7 @@ def generate_mixed_signal_data(signals: np.ndarray, snr=-30):
     for i in range(num_samples):
         signal = signals[i]
         # 计算信号功率
-        signal_power = np.mean(signal ** 2)
-
+        signal_power = np.mean(signal ** 2) if np.mean(signal ** 2) > 1 else 1
         # 给定信噪比，计算噪声功率
         # snr = np.random.randint(-35, -30)  # 信噪比在-20到-10之间随机取值
         snr_linear = 10 ** (snr / 10)
@@ -388,7 +368,7 @@ def make_noise(t: tensor) -> tensor:
     :return:噪声的信号
     """
     t = t.detach().cpu().numpy()
-    snr = 30 - np.power(t, 0.55)  # 计算信噪比, 该公式应当根据实际情况调整
+    snr = -10 - np.power(t, 0.5)  # 计算信噪比, 该公式应当根据实际情况调整
     noises = []
     snr_linears = 10 ** (snr / 10)
     if isinstance(snr_linears, np.ndarray):
@@ -471,7 +451,7 @@ def KM_signal(signal: np.ndarray) -> np.ndarray:
     F = np.array([[1]])
     H = np.array([[1]])
     Q = np.array([[0.0001]])
-    R = np.array([[0.1]])
+    R = np.array([[0.001]])
     x0 = np.array([[0]])
     P0 = np.array([[1]])
     kf = KalmanFilterSignal(F, H, Q, R, x0, P0)

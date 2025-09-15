@@ -43,12 +43,13 @@ class BiLSTM(nn.Module):
         input_channel = pe_dim
         output_channel = pe_dim // 2
         mlp_input_size = lstm_hidden_size * 2 * pe_dim
-        for _ in range(num_layers if num_layers <= 8 else 8):
+        for _ in range(num_layers // 2 if num_layers <= 8 else 4):
             self.classifier.append(
                 nn.Sequential(
                     nn.Conv1d(input_channel, output_channel, 3, 1, 1),
-                    nn.ReLU(),
                     nn.BatchNorm1d(output_channel),
+                    nn.ReLU(),
+                    nn.Dropout(0.5),
                     nn.MaxPool1d(2)
                 )
             )  # 每次卷积后，长度减半, 通道数减半
@@ -60,21 +61,20 @@ class BiLSTM(nn.Module):
             output_channel = output_channel // 2
             mlp_input_size = mlp_input_size // 4
         output_channel = input_channel * 2
-        for _ in range(num_layers if num_layers <= 8 else 8):
+        for _ in range(num_layers // 2 if num_layers <= 8 else 4):
             self.classifier.append(
                 nn.Sequential(
                     nn.Conv1d(input_channel, output_channel, 3, 1, 1),
-                    nn.ReLU(),
                     nn.BatchNorm1d(output_channel),
+                    nn.ReLU(),
+                    nn.Dropout(0.5),
                 )
             )  # 每次卷积后，长度不变, 通道数翻倍
             input_channel = output_channel
             output_channel = output_channel * 2
             mlp_input_size = mlp_input_size * 2
         self.ffn = nn.Sequential(
-            nn.Linear(mlp_input_size, mlp_input_size // 4),
-            nn.ReLU(),
-            nn.Linear(mlp_input_size // 4, mlp_input_size // 16),
+            nn.Linear(mlp_input_size, mlp_input_size // 16),
             nn.ReLU(),
             nn.Linear(mlp_input_size // 16, num_outputs)
         )
@@ -209,19 +209,18 @@ class ConvNet1DClassify(nn.Module):
                 nn.Conv1d(prev_channel, channel, 3, 1, 1),
                 nn.BatchNorm1d(channel),
                 nn.ReLU(),
-                nn.MaxPool1d(2) if W > 32 else nn.Identity(),  # 池化层，只有当W > 32时应用
+                nn.MaxPool1d(2) if W > 64 else nn.Identity(),  # 池化层，只有当W > 64时应用
                 nn.Dropout(0.5)  # Dropout层
             )
             self.cnn1d_blocks.append(block)
             prev_channel = channel
-            if W > 32:
+            if W > 64:
                 W //= 2
 
         self.fces = nn.Sequential(
-            nn.Linear(W * prev_channel, W // 2),
+            nn.Linear(W * prev_channel, W * prev_channel // 8),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(W // 2, out_dim)
+            nn.Linear(W * prev_channel // 8, out_dim)
         )
 
     def forward(self, x):
@@ -236,7 +235,7 @@ class ConvNet1DClassify(nn.Module):
         """
         for m_x in self.cnn1d_blocks:
             x = m_x(x)
-        return self.fces(x.flatten(1))
+        return x.flatten(1), self.fces(x.flatten(1))  # 输出feature和分类结果
 
 
 class ConvNet(nn.Module):

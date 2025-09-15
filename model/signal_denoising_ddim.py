@@ -16,7 +16,7 @@ class Signal_denoising(DDIM):
         super().__init__(device, n_steps, min_beta, max_beta)
 
     def sample_forward(self, x, t, eps=None):
-        alpha_bar = self.alpha_bars[t].reshape(-1, 1, 1)
+        alpha_bar = self.alpha_bars[t].reshape(-1, 1, 1)  # alpha_bar是一个标量,作用是控制噪声的强度,与t的关系是线性的
         # 计算x(32,1,512)中每一条信号(1,1,512)的power,得到(32,)
         x_power = torch.mean(x ** 2, dim=(1, 2))
         # 将x_power的维度变为(32,1,512)
@@ -27,6 +27,7 @@ class Signal_denoising(DDIM):
             eps[i] = torch.sqrt(x_power[i]) * eps[i]  # 此时的噪声是真实的噪声
 
         res = eps * torch.sqrt(1 - alpha_bar) + torch.sqrt(alpha_bar) * x
+        # res = eps + x
         # 生成带噪声的信号,信噪比sqrt((1-alpha_bar)/alpha_bar)
         return res
 
