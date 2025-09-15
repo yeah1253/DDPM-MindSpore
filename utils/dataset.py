@@ -1,5 +1,5 @@
 import os
-
+from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
@@ -209,11 +209,30 @@ class Signals(Dataset):
     def __getitem__(self, idx):
         return self.data[idx], self.target[idx]
 
+    # def save(self, path, file_name='signals'):
+    #     # 保存数据到mat文件
+    #     print("myr")
+    #     data = {'data': self.data.reshape(-1, get_shape()[-1]), 'target': self.target}
+    #     savePath = os.path.join(path, file_name + '.mat')
+    #     savemat(savePath, data)
     def save(self, path, file_name='signals'):
-        # 保存数据到mat文件
-        data = {'data': self.data.reshape(-1, get_shape()[-1]), 'target': self.target}
-        savePath = os.path.join(path, file_name + '.mat')
-        savemat(savePath, data)
+        # 1) 规范与确保目录存在
+        p = Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+
+        # 2) 保证是 numpy，且形状合法
+        data_np = self.data.detach().cpu().numpy() if isinstance(self.data, torch.Tensor) else np.asarray(self.data)
+        target_np = self.target.detach().cpu().numpy() if isinstance(self.target, torch.Tensor) else np.asarray(
+            self.target)
+
+        # 3) 按 get_shape() 的最后一维重排（确保能整除，否则会 ValueError）
+        cols = int(get_shape()[-1])
+        data_np = data_np.reshape(-1, cols)
+
+        # 4) 最终保存
+        full_path = p / f'{file_name}.mat'
+        savemat(str(full_path), {'data': data_np, 'target': target_np})
+        print('Saved to:', full_path.resolve())
 
 
 class Signal_fft(Signals):
