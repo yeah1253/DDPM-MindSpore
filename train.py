@@ -364,7 +364,7 @@ def cnn_train(writer, net, train_dataloader, val_dataloader, device, ckpt_path, 
     net = net.to(device).float()
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adamax(net.parameters(), 1e-3, weight_decay=1e-5)
-    ealy_stop = EarlyStopping(log_dir, patience=30, verbose=True)
+    ealy_stop = EarlyStopping(log_dir, patience=10, verbose=True)
     best_acc = 0
     train_acces = []
     train_losses = []
@@ -441,6 +441,7 @@ def prepare_data(data_path='./data',
     # 根据是否添加噪声，以及是否去噪，选择不同的数据集， 以及绘制不同的图像，确定不同的任务类型
     if denoising_properties:
         # train_sd_ddim()
+        save_dir = denoising_properties.get('save_dir', './work_dirs/denoised_mat')
         add_noise = True
         dataset = Signals(data_path, slice_length=slice_length, slice_type=slice_type,
                           add_noise=add_noise, windows_rate=windows_ratio, delete_labels=delete_labels)
@@ -495,7 +496,9 @@ def prepare_data(data_path='./data',
         plt.savefig(os.path.join('./work_dirs/classify',denoising_properties['denoising method'] + task_type + '_signal.png'))
         plt.close()
         # 将处理后的数据保存
-        dataset.save(root_dir, 'reduce_noise_model_bi_lstm_big_huber_loss_power_snr')
+        # dataset.save(root_dir, 'reduce_noise_model_bi_lstm_big_huber_loss_power_snr')
+        method = denoising_properties['denoising method']
+        dataset.save(save_dir, f'{method}_denoised')
     else:
         dataset = Signals(data_path, slice_length=slice_length, slice_type=slice_type,
                           add_noise=add_noise, windows_rate=windows_ratio, delete_labels=delete_labels)
