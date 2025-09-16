@@ -647,13 +647,15 @@ if __name__ == '__main__':
         log_dirs=['./run/0516dn/mini', './run/0516dn/small', './run/0516dn/medium', './run/0516dn/big'],
         denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
     )  # 训练分类模型， 输入为带噪声的信号经过sd_ddim去噪后的信号
-    # d_p['denoising method'] = 'kalman'
-    # train_classification(
-    #     log_dirs=['./run/0516kal/mini', './run/0516kal/small', './run/0516kal/medium', './run/0516kal/big']
-    #     , denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
-    # )   # 训练分类模型， 输入为带噪声的信号经过kalman去噪后的信号
-    # d_p['denoising method'] = 'wavelet'
-    # train_classification(
-    #     log_dirs=['./run/0516wvlt/mini', './run/0516wvlt/small', './run/0516wvlt/medium', './run/0516wvlt/big']
-    #     , denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
-    # )   # 训练分类模型， 输入为带噪声的信号经过wavelet去噪后的信号
+
+    d_p['denoising method'] = 'kalman'
+    train_classification(
+        log_dirs=['./run/0516kal/mini', './run/0516kal/small', './run/0516kal/medium', './run/0516kal/big']
+        , denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
+    )   # 训练分类模型， 输入为带噪声的信号经过kalman去噪后的信号
+
+    d_p['denoising method'] = 'wavelet'
+    train_classification(
+        log_dirs=['./run/0516wvlt/mini', './run/0516wvlt/small', './run/0516wvlt/medium', './run/0516wvlt/big']
+        , denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
+    )   # 训练分类模型， 输入为带噪声的信号经过wavelet去噪后的信号
