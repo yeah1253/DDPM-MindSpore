@@ -360,8 +360,7 @@ def generate_mixed_signal_data(signals: np.ndarray, snr=-30):
     """
     signals = np.zeros((10000, 512), dtype=np.float16) if signals is None else signals
     num_samples, sample_length = len(signals), len(signals[0][0])
-    signals.reshape(-1, sample_length)
-    noisy_signals = np.zeros((num_samples, 1, sample_length), dtype=np.float16)
+    noisy_signals = np.zeros((num_samples,1, sample_length), dtype=np.float16)
 
     for i in range(num_samples):
         signal = signals[i]
