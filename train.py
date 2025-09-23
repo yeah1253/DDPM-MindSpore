@@ -11,6 +11,8 @@ from torch import tensor
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from scipy.io import loadmat
+from scipy.signal import stft
 
 from model.ddpm import DDPM, build_network
 from model.fft_loss import CombinedLoss
@@ -496,9 +498,19 @@ def prepare_data(data_path='./data',
         plt.savefig(os.path.join('./work_dirs/classify',denoising_properties['denoising method'] + task_type + '_signal.png'))
         plt.close()
         # 将处理后的数据保存
-        # dataset.save(root_dir, 'reduce_noise_model_bi_lstm_big_huber_loss_power_snr')
+        # 将处理后的数据保存（统一到 save_dir）
+        os.makedirs(save_dir, exist_ok=True)
+        dataset.save(save_dir, 'reduce_noise_model_bi_lstm_big_huber_loss_power_snr')
         method = denoising_properties['denoising method']
         dataset.save(save_dir, f'{method}_denoised')
+        try:
+            saved_mat_path = os.path.join(save_dir, f'{method}_denoised.mat')
+            trace_and_plot(saved_mat_path, data_path, row_idx=0, fs=5120, do_stft=True,
+                           out_png=os.path.join(save_dir, f'trace_row0_{method}.png'))
+        except Exception as e:
+            print("[trace_and_plot skipped]", e)
+
+
     else:
         dataset = Signals(data_path, slice_length=slice_length, slice_type=slice_type,
                           add_noise=add_noise, windows_rate=windows_ratio, delete_labels=delete_labels)
@@ -609,6 +621,122 @@ def train_sd_ddim():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     for model_name, config_id, log_dir in zip(model_names, config_ids, log_dirs):
         train_ddpm(device, model_name, './data', config_id, log_dir, 300)
+def _crop_20_80(x):
+    L = len(x)
+    return x[int(0.2*L): int(0.8*L)]
+
+def _slice_512(x, slice_idx, slice_len=512):
+    start = slice_idx * slice_len
+    end   = start + slice_len
+    return x[start:end]
+
+def _read_axis_from_mat(mat_path, axis_key):
+    raw = loadmat(mat_path)
+    names = [v[0][0] for v in raw['data'][0]]
+    series = [v[1].T[0] for v in raw['data'][0]]
+    name2series = dict(zip(names, series))
+    return name2series[axis_key]
+def _matcell_to_pystr(x):
+    # 把 loadmat 读出的各种字符串形态（object cell、char 数组等）统一转成 Python str
+    import numpy as np
+    if isinstance(x, str):
+        return x
+    if isinstance(x, np.ndarray):
+        if x.dtype == object and x.size == 1:
+            return _matcell_to_pystr(x.item())           # 1x1 object cell -> 递归取出
+        if x.dtype.kind in ('U', 'S'):                   # char 数组，如 (1, N)
+            return ''.join(x.astype(str).ravel().tolist())
+        if x.size == 1:
+            return _matcell_to_pystr(x.reshape(-1)[0])   # 其它单元素数组
+    return str(x)
+
+def _matcell_to_int(x):
+    import numpy as np
+    if isinstance(x, (int, np.integer)):
+        return int(x)
+    if isinstance(x, np.ndarray):
+        try:
+            return int(x.item())                         # 标量 cell
+        except Exception:
+            return int(np.array(x).reshape(-1)[0])       # 展平取第一个
+    return int(x)
+
+
+def _as_str(x):
+    """把 loadmat 读出来的字符串（可能是 object cell、char 数组、标量 ndarray）统一转成 Python str"""
+    if isinstance(x, str):
+        return x
+    if isinstance(x, np.ndarray):
+        # object cell 的常见情况：1x1 或 形如 arr[row] 得到的 0d/1d object
+        if x.dtype == object:
+            if x.ndim == 0:
+                return _as_str(x.item())
+            # 展平取第一个元素递归解包（用于 arr[row_idx] 是 object 的情况）
+            return _as_str(x.reshape(-1)[0])
+        # char 数组（U/S 类型），如 (1, N) 或 (N,)
+        if x.dtype.kind in ("U", "S"):
+            return "".join(x.astype(str).ravel().tolist())
+        # 其它 ndarray：若是单元素，也当成标量处理
+        if x.size == 1:
+            return _as_str(x.reshape(-1)[0])
+    # 兜底
+    return str(x)
+
+def _as_int(x):
+    """把 loadmat 读出来的标量（可能是 0d/1d ndarray 或 object cell）统一成 int"""
+    if isinstance(x, (int, np.integer)):
+        return int(x)
+    if isinstance(x, np.ndarray):
+        try:
+            return int(x.item())
+        except Exception:
+            return int(np.array(x).reshape(-1)[0])
+    return int(x)
+
+def trace_and_plot(saved_mat_path, data_root, row_idx, fs=5120, do_stft=True, out_png=None):
+    saved = loadmat(saved_mat_path)
+
+    # 去噪后/保存的 512 点
+    data_row = np.asarray(saved["data"][row_idx, :]).ravel()
+
+    # 读取 meta（关键：用 _as_str / _as_int 解包）
+    filename  = _as_str(saved["meta_filename"][row_idx])   # 原始 .mat 文件名
+    axis_key  = _as_str(saved["meta_axis"][row_idx])       # 轴键，如 'TimeData/Motor/S_x'
+    slice_idx = _as_int(saved["meta_slice_idx"][row_idx])  # 第几个 512 切片（0-based）
+
+    # 回到原始 .mat → 取对应轴 → 同样的 20%-80% 裁剪 → 同样的 512 顺切
+    ori_path  = os.path.join(data_root, filename)
+    full_axis = _read_axis_from_mat(ori_path, axis_key)
+    full_axis = _crop_20_80(full_axis)
+    ori_row   = _slice_512(full_axis, slice_idx, 512)
+
+    assert len(ori_row) == 512 and len(data_row) == 512, "长度应为 512"
+
+    # 画频谱/STFT 对比
+    if do_stft:
+        f1, t1, Z1 = stft(ori_row,  fs=fs, nperseg=128, noverlap=64)
+        f2, t2, Z2 = stft(data_row, fs=fs, nperseg=128, noverlap=64)
+        plt.figure(figsize=(14, 5))
+        plt.subplot(1, 2, 1); plt.pcolormesh(t1, f1, np.abs(Z1)); plt.title("Original STFT");  plt.xlabel("Time"); plt.ylabel("Freq (Hz)")
+        plt.subplot(1, 2, 2); plt.pcolormesh(t2, f2, np.abs(Z2)); plt.title("Denoised STFT");  plt.xlabel("Time"); plt.ylabel("Freq (Hz)")
+    else:
+        def amp_spectrum(x):
+            X = np.fft.rfft(x)
+            freqs = np.fft.rfftfreq(len(x), d=1.0/fs)
+            return freqs, np.abs(X)
+        f1, A1 = amp_spectrum(ori_row)
+        f2, A2 = amp_spectrum(data_row)
+        plt.figure(figsize=(14, 5))
+        plt.subplot(1, 2, 1); plt.plot(f1, A1); plt.title("Original FFT");  plt.xlabel("Freq (Hz)");  plt.ylabel("Amplitude")
+        plt.subplot(1, 2, 2); plt.plot(f2, A2); plt.title("Denoised FFT");  plt.xlabel("Freq (Hz)");  plt.ylabel("Amplitude")
+
+    plt.suptitle(f"{filename} | {axis_key} | slice #{slice_idx} | row {row_idx}")
+    plt.tight_layout()
+    if out_png:
+        plt.savefig(out_png, dpi=150)
+        plt.close()
+    else:
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -633,29 +761,29 @@ if __name__ == '__main__':
         'windows_ratio': 0.05,
     }
 
-    train_classification(
-        log_dirs=['./run/0516n/mini', './run/0516n/small', './run/0516n/medium', './run/0516n/big'],
-        ds_config=dataset_config, add_noise=True, batch_size=batch_size
-    )  # 训练分类模型， 输入为带噪声的信号
-
-    train_classification(
-        log_dirs=['./run/0516o/mini', './run/0516o/small', './run/0516o/medium', './run/0516o/big'],
-        ds_config=dataset_config, add_noise=False, batch_size=batch_size
-    )  # 训练分类模型， 输入为原始信号
+    # train_classification(
+    #     log_dirs=['./run/0516n/mini', './run/0516n/small', './run/0516n/medium', './run/0516n/big'],
+    #     ds_config=dataset_config, add_noise=True, batch_size=batch_size
+    # )  # 训练分类模型， 输入为带噪声的信号
+    #
+    # train_classification(
+    #     log_dirs=['./run/0516o/mini', './run/0516o/small', './run/0516o/medium', './run/0516o/big'],
+    #     ds_config=dataset_config, add_noise=False, batch_size=batch_size
+    # )  # 训练分类模型， 输入为原始信号
 
     train_classification(
         log_dirs=['./run/0516dn/mini', './run/0516dn/small', './run/0516dn/medium', './run/0516dn/big'],
         denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
     )  # 训练分类模型， 输入为带噪声的信号经过sd_ddim去噪后的信号
 
-    d_p['denoising method'] = 'kalman'
-    train_classification(
-        log_dirs=['./run/0516kal/mini', './run/0516kal/small', './run/0516kal/medium', './run/0516kal/big']
-        , denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
-    )   # 训练分类模型， 输入为带噪声的信号经过kalman去噪后的信号
-
-    d_p['denoising method'] = 'wavelet'
-    train_classification(
-        log_dirs=['./run/0516wvlt/mini', './run/0516wvlt/small', './run/0516wvlt/medium', './run/0516wvlt/big']
-        , denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
-    )   # 训练分类模型， 输入为带噪声的信号经过wavelet去噪后的信号
+    # d_p['denoising method'] = 'kalman'
+    # train_classification(
+    #     log_dirs=['./run/0516kal/mini', './run/0516kal/small', './run/0516kal/medium', './run/0516kal/big']
+    #     , denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
+    # )   # 训练分类模型， 输入为带噪声的信号经过kalman去噪后的信号
+    #
+    # d_p['denoising method'] = 'wavelet'
+    # train_classification(
+    #     log_dirs=['./run/0516wvlt/mini', './run/0516wvlt/small', './run/0516wvlt/medium', './run/0516wvlt/big']
+    #     , denoising_properties=d_p, ds_config=dataset_config, batch_size=batch_size
+    # )   # 训练分类模型， 输入为带噪声的信号经过wavelet去噪后的信号

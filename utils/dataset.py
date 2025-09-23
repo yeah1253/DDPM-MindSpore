@@ -82,31 +82,36 @@ class Signal:
             # plt.close()
         # print("data[0]=", data[0])
         slices = []
+        file_stem = Path(self.path).stem
         if self.slice_type == 'cut':
-            slices_labels = [self.label + "_" + str(i) for i in
-                             range(len(data[0][0]) // self.slice_length)]  # 生成切片标签
-            for v in data:  # 切片
-                temp = []
-                for i in range(len(v[0]) // self.slice_length):
-                    temp.append(np.array(v[0][i * self.slice_length:(i + 1) * self.slice_length]))
-                slices.append(temp)
+            # 等长顺切
+            for v in data:
+                slices.append([v[0][i:i + self.slice_length]
+                               for i in
+                               range(0, (len(v[0]) // self.slice_length) * self.slice_length, self.slice_length)])
+            # 列名：类|文件|切片号（保证唯一、可追溯）
+            slices_labels = [f"{self.label}|{file_stem}|{i}"
+                             for i in range(len(data[0][0]) // self.slice_length)]
+
         elif self.slice_type == 'window':
+            # 滑窗切片
             for v in data:
                 temp = []
                 left, right = 0, self.slice_length
-                while right < len(v[0]):  # 信号重合度为1 - self.windows_rate
+                while right < len(v[0]):  # 信号重合度为 1 - self.windows_rate
                     temp.append(np.array(v[0][left:right]))
                     left += int(self.slice_length * self.windows_rate)
                     right += int(self.slice_length * self.windows_rate)
                 slices.append(temp)
-            slices_labels = [self.label + "_" + str(i) for i in range(len(slices[0]))]
+            slices_labels = [f"{self.label}|{file_stem}|{i}" for i in range(len(slices[0]))]
+
         else:
-            for v in data:  # 存储原始数据
+            # 不切片：整个序列作为一条
+            for v in data:
                 slices.append([v[0]])
-            slices_labels = [self.label + "_" + str(i) for i in range(len(slices[0]))]
-        # print("dataLabels=", dataLabels)
-        df = DataFrame(slices, index=dataLabels, columns=slices_labels, )
-        # print("df=", df)
+            slices_labels = [f"{self.label}|{file_stem}|{i}" for i in range(len(slices[0]))]
+
+        df = DataFrame(slices, index=dataLabels, columns=slices_labels)
         return df
 
     def saveSTFT(self):
@@ -172,25 +177,42 @@ class Signals(Dataset):
         self.slice_type = slice_type
         self.data, self.target = self.makeDataSets()
 
+    # dataset.py  class Signals.makeDataSets
     def makeDataSets(self):
-        dic = {
+        axis_dic = {
             'TimeData/Motor/S_x': 0,
             'TimeData/Motor/R_y': 1,
             'TimeData/Motor/T_z': 2,
         }
-        data = []
-        target = []
-        for key in dic:
-            selected_column = self.df.loc[key]
+        data, target = [], []
+        meta = []  # 新增：与 data 的行一一对应
+
+        for axis_key, axis_id in axis_dic.items():
+            selected_column = self.df.loc[axis_key]  # 这一行里每一列是一个切片
             for j in range(len(selected_column)):
-                # 将selected_column[j]转换为(1, x)的形状
-                data.append(selected_column[j].reshape(1, -1))
-                # 获取标签
-                target.append(self.labels[selected_column.index[j].split('_')[0]])
-        if self.slice_type != 'cut' and self.slice_type != 'window':
-            # 统一数据长度, 使其具有相同的长度
+                # data
+                data.append(selected_column.iloc[j].reshape(1, -1))
+                # label_id（数字）
+                label_name, file_stem, slice_str = selected_column.index[j].split('|')
+                slice_idx = int(slice_str)
+                label_id = self.labels[label_name]
+
+                target.append(label_id)
+
+                # 收集 meta（字符串都存一份，方便写 .mat）
+                meta.append({
+                    'filename': file_stem + '.mat',
+                    'axis': axis_key,  # e.g., 'TimeData/Motor/S_x'
+                    'slice_idx': slice_idx,  # 0-based
+                    'label_name': label_name,  # e.g., 'Aligned'
+                    'label_id': label_id,
+                })
+
+        if self.slice_type not in ('cut', 'window'):
             min_length = min([len(v[0]) for v in data])
             data = [v[:, :min_length] for v in data]
+
+        self.meta = meta  # 新增：挂到对象上
         data = np.array(data)
         target = np.array(target)
         return data, target
@@ -228,10 +250,27 @@ class Signals(Dataset):
         # 3) 按 get_shape() 的最后一维重排（确保能整除，否则会 ValueError）
         cols = int(get_shape()[-1])
         data_np = data_np.reshape(-1, cols)
+        mdict = {'data': data_np, 'target': target_np}
+
+        # 新增：保存 meta
+        if hasattr(self, 'meta') and len(self.meta) == len(data_np):
+            filenames = np.array([m['filename'] for m in self.meta], dtype=object)
+            axes = np.array([m['axis'] for m in self.meta], dtype=object)
+            slice_idxs = np.array([m['slice_idx'] for m in self.meta], dtype=np.int32)
+            label_names = np.array([m['label_name'] for m in self.meta], dtype=object)
+            label_ids = np.array([m['label_id'] for m in self.meta], dtype=np.int32)
+
+            mdict.update({
+                'meta_filename': filenames,
+                'meta_axis': axes,
+                'meta_slice_idx': slice_idxs,
+                'meta_label_name': label_names,
+                'meta_label_id': label_ids
+            })
 
         # 4) 最终保存
         full_path = p / f'{file_name}.mat'
-        savemat(str(full_path), {'data': data_np, 'target': target_np})
+        savemat(str(full_path), mdict)
         print('Saved to:', full_path.resolve())
 
 
